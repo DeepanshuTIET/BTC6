@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crypto Dashboard - Historical Data</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #131722;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #ffffff;
+            margin: 0;
+        }
+        .nav-link {
+            color: #ff9900;
+            text-decoration: none;
+            font-size: 16px;
+        }
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+        #chart-container {
+            background-color: #131722;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            margin-bottom: 20px;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        select, button {
+            background-color: #2a2e39;
+            color: white;
+            border: 1px solid #4e5b85;
+            padding: 8px 15px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        select:hover, button:hover {
+            background-color: #3a3e4a;
+        }
+        button.active {
+            background-color: #3a7ca8;
+        }
+        .chart-types {
+            display: flex;
+            gap: 10px;
+        }
+        #loading-indicator {
+            color: #ff9900;
+            margin-left: 15px;
+            font-style: italic;
+            display: none;
+        }
+        .error-message {
+            color: #ff5555;
+            padding: 20px;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Crypto Trading Dashboard</h1>
+            <a href="/" class="nav-link">← Back to Live Dashboard</a>
+        </div>
+        <h2>Historical Data View</h2>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>Timeframe:</label>
+                <select id="timeframe-select">
+                    <option value="1">1 Hour</option>
+                    <option value="3">3 Hours</option>
+                    <option value="5" selected>5 Hours</option>
+                    <option value="12">12 Hours</option>
+                    <option value="24">24 Hours</option>
+                    <option value="72">3 Days</option>
+                    <option value="168">7 Days</option>
+                </select>
+            </div>
+            
+            <div class="control-group chart-types">
+                <label>Chart Type:</label>
+                <button id="line-chart" class="active">Line</button>
+                <button id="candlestick-chart">Candlestick</button>
+            </div>
+            
+            <div class="control-group candlestick-controls" style="display: none;">
+                <label>Interval:</label>
+                <select id="interval-select">
+                    <option value="1">1 min</option>
+                    <option value="5">5 min</option>
+                    <option value="15" selected>15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60">1 hour</option>
+                </select>
+            </div>
+            
+            <span id="loading-indicator">Loading...</span>
+        </div>
+        
+        <div id="chart-container">
+            <div id="plotly-chart"></div>
+        </div>
+        
+        <div class="error-message" id="error-message">
+            No data available for the selected timeframe. Try a shorter timeframe or return later when more data has been collected.
+        </div>
+    </div>
+
+    <script>
+        let currentChartType = 'line';
+        
+        // Function to load historical data
+        function loadHistoricalData() {
+            const timeframe = $('#timeframe-select').val();
+            const interval = $('#interval-select').val();
+            
+            $('#loading-indicator').show();
+            $('#error-message').hide();
+            
+            // Build query parameters
+            let url = `/historical-data?timeframe=${timeframe}&type=${currentChartType}`;
+            if (currentChartType === 'candlestick') {
+                url += `&interval=${interval}`;
+            }
+            
+            $.getJSON(url, function(data) {
+                if (data.error) {
+                    $('#error-message').text(data.error).show();
+                    $('#chart-container').hide();
+                } else {
+                    $('#chart-container').show();
+                    const chartData = JSON.parse(data.graph);
+                    Plotly.newPlot('plotly-chart', chartData);
+                }
+            })
+            .fail(function() {
+                $('#error-message').text('Failed to load data. Please try again.').show();
+                $('#chart-container').hide();
+            })
+            .always(function() {
+                $('#loading-indicator').hide();
+            });
+        }
+        
+        // Initialize the chart when the page loads
+        $(document).ready(function() {
+            loadHistoricalData();
+            
+            // Set up event listeners for controls
+            $('#timeframe-select, #interval-select').change(function() {
+                loadHistoricalData();
+            });
+            
+            // Chart type buttons
+            $('#line-chart').click(function() {
+                currentChartType = 'line';
+                $('.chart-types button').removeClass('active');
+                $(this).addClass('active');
+                $('.candlestick-controls').hide();
+                loadHistoricalData();
+            });
+            
+            $('#candlestick-chart').click(function() {
+                currentChartType = 'candlestick';
+                $('.chart-types button').removeClass('active');
+                $(this).addClass('active');
+                $('.candlestick-controls').show();
+                loadHistoricalData();
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crypto Trading Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #ffffff;
+            margin: 0;
+        }
+        .nav-link {
+            color: #ff9900;
+            text-decoration: none;
+            font-size: 16px;
+            padding: 8px 16px;
+            border-radius: 4px;
+            background-color: #1e1e1e;
+            transition: background-color 0.2s;
+        }
+        .nav-link:hover {
+            background-color: #2a2a2a;
+        }
+        #position-indicator {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        #chart-container {
+            height: 800px;
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        #status-message {
+            color: #ff9900;
+            margin-top: 10px;
+            font-style: italic;
+        }
+        .loading {
+            display: inline-block;
+            margin-left: 10px;
+            font-size: 14px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Crypto Trading Dashboard</h1>
+            <a href="/history" class="nav-link">View Historical Data</a>
+        </div>
+        <h2>BTC Price & MT5 Equity</h2>
+        <div id="chart-container">
+            <div id="plotly-chart"></div>
+        </div>
+        <div id="position-indicator">BTC Position: {{ btc_position }}</div>
+        <div id="status-message">Connected to MetaAPI using real account data (Deepanshu Goyal - GTCGlobalTrade)</div>
+    </div>
+
+    <script>
+        let chart;
+        let firstLoad = true;
+        
+        // Function to update the chart
+        function updateChart() {
+            $('#status-message').html('Updating data <span class="loading">•••</span>');
+            $.getJSON('/update-data', function(data) {
+                // Use newPlot only on first load, then update instead for better performance
+                if (firstLoad) {
+                    chart = JSON.parse(data.graph);
+                    Plotly.newPlot('plotly-chart', chart);
+                    firstLoad = false;
+                } else {
+                    try {
+                        // Parse the new chart data
+                        const chartData = JSON.parse(data.graph);
+                        
+                        // Create a more robust update with explicit data points
+                        const updateData = {
+                            x: [[...chartData.data[0].x], [...chartData.data[1].x]],
+                            y: [[...chartData.data[0].y], [...chartData.data[1].y]]
+                        };
+                        
+                        // Update the plot with new data
+                        Plotly.update('plotly-chart', updateData);
+                    } catch (e) {
+                        console.error('Error updating chart:', e);
+                        // Fall back to complete redraw if update fails
+                        chart = JSON.parse(data.graph);
+                        Plotly.newPlot('plotly-chart', chart);
+                    }
+                }
+                
+                $('#position-indicator').text('BTC Position: ' + data.position);
+                $('#position-indicator').css('color', data.position_color);
+                $('#status-message').html('Connected to MetaAPI - BTC updates every 1s, MT5 updates every 2.5s');
+            })
+            .fail(function() {
+                $('#status-message').html('Error updating data. Will try again in 1 second.');
+            });
+        }
+
+        // Initial chart load
+        updateChart();
+
+        // Update every 1 second
+        setInterval(updateChart, 1000);
+    </script>
+</body>
+</html>
