@@ -1,67 +1,87 @@
 import json
 import os
 import requests
+import math
+import random
 import plotly
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from flask import Flask, render_template, jsonify, request
 from datetime import datetime, timedelta
-import math
-import random
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-# API URLs and configuration from environment variables
+# API URLs
 BINANCE_API_URL = os.getenv('BINANCE_API_URL', 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT')
 BINANCE_KLINE_URL = 'https://api.binance.com/api/v3/klines'
 
 # Create Flask app
 app = Flask(__name__, 
-            template_folder='../templates',  # Adjust template path for Vercel deployment
-            static_folder='../static',      # Adjust static path for Vercel deployment
-            static_url_path='/static')     # Explicit static URL path for Vercel
+            template_folder='../templates',
+            static_folder='../static',
+            static_url_path='/static')
 
-# Store last fetched data in memory (note: this will reset between function invocations)
+# Store last fetched data in memory (will reset between function invocations in serverless)
 last_btc_price = 0
-last_equity = 10000  # Simulated starting value
-btc_position = "No Position"
+positions = ["Buy", "Sell", "No Position"]
+position_weights = [0.3, 0.2, 0.5]  # Weighted probabilities
 
 # Function to fetch BTC price
 def fetch_btc_price():
+    """Fetch current BTC price from Binance API"""
     try:
         response = requests.get(BINANCE_API_URL)
         data = response.json()
         return float(data['price'])
     except Exception as e:
         print(f"Error fetching BTC price: {e}")
-        return last_btc_price if last_btc_price else 0
+        # Return last known price or a reasonable default
+        return last_btc_price if last_btc_price else 20000.0
 
-# Function to get historical BTC price data directly from Binance
+# Function to simulate MT5 equity based on BTC price
+def simulate_mt5_equity(btc_price):
+    """Generate simulated MT5 equity value correlated with BTC price"""
+    base_equity = 10000
+    time_component = math.sin(datetime.now().timestamp() / 1800)  # 30-minute cycle
+    price_factor = (btc_price % 1000) / 1000  # Use the last 3 digits
+    
+    # Combine factors for a realistic, correlated movement
+    equity = base_equity * (1 + (time_component * 0.02) + (price_factor * 0.04))
+    return round(equity, 2)
+
+# Function to simulate BTC position
+def simulate_btc_position():
+    """Simulate BTC position (Buy, Sell, No Position)"""
+    # Use weighted random choice
+    return random.choices(positions, weights=position_weights, k=1)[0]
+
+# Function to get historical BTC data from Binance
 def fetch_historical_btc_data(timeframe='5h'):
+    """Fetch historical BTC price data directly from Binance API"""
     # Map timeframe string to milliseconds
     timeframe_map = {
-        '1h': 60 * 60 * 1000,
-        '3h': 3 * 60 * 60 * 1000,
-        '5h': 5 * 60 * 60 * 1000,
-        '12h': 12 * 60 * 60 * 1000,
-        '1d': 24 * 60 * 60 * 1000,
-        '3d': 3 * 24 * 60 * 60 * 1000,
-        '7d': 7 * 24 * 60 * 60 * 1000
+        '1': 60 * 60 * 1000,        # 1 hour
+        '3': 3 * 60 * 60 * 1000,    # 3 hours
+        '5': 5 * 60 * 60 * 1000,    # 5 hours
+        '12': 12 * 60 * 60 * 1000,  # 12 hours
+        '24': 24 * 60 * 60 * 1000,  # 24 hours
+        '72': 3 * 24 * 60 * 60 * 1000,  # 3 days
+        '168': 7 * 24 * 60 * 60 * 1000,  # 7 days
     }
     
     # Calculate start time based on timeframe
     end_time = int(datetime.now().timestamp() * 1000)
-    start_time = end_time - timeframe_map.get(timeframe, timeframe_map['5h'])
+    start_time = end_time - timeframe_map.get(timeframe, timeframe_map['5'])
     
     # Determine appropriate interval
-    if timeframe in ['1h', '3h', '5h']:
-        interval = '1m'  # 1-minute candles for shorter timeframes
-    elif timeframe in ['12h', '1d']:
-        interval = '5m'  # 5-minute candles for medium timeframes
+    if timeframe in ['1', '3', '5']:
+        interval = '1m'  # 1-minute candles
+    elif timeframe in ['12', '24']:
+        interval = '5m'  # 5-minute candles
     else:
-        interval = '15m'  # 15-minute candles for longer timeframes
+        interval = '15m'  # 15-minute candles
     
     # Fetch data from Binance
     params = {
@@ -100,8 +120,9 @@ def fetch_historical_btc_data(timeframe='5h'):
         print(f"Error fetching historical BTC data: {e}")
         return []
 
-# Function to simulate MT5 equity data
-def simulate_mt5_equity_data(timeframe='5h', btc_data=None):
+# Function to simulate MT5 equity data based on BTC data
+def simulate_mt5_equity_data(btc_data):
+    """Generate simulated MT5 equity data correlated with BTC price data"""
     if not btc_data:
         return []
     
@@ -110,7 +131,7 @@ def simulate_mt5_equity_data(timeframe='5h', btc_data=None):
     base_equity = 10000
     
     for i, btc_point in enumerate(btc_data):
-        # Create a simulation where equity follows BTC price with some lag and variation
+        # Create a simulation where equity follows BTC price with lag and variation
         btc_price = btc_point['price']
         # Normalize BTC price to a percentage change from first point
         if i == 0:
@@ -121,10 +142,7 @@ def simulate_mt5_equity_data(timeframe='5h', btc_data=None):
             })
         else:
             # Simulate equity based on BTC price with some noise
-            btc_change = (btc_price - first_btc) / first_btc  # Percentage change from first point
-            
-            # Add randomness and lag to make it look more realistic
-            import random
+            btc_change = (btc_price - first_btc) / first_btc  # Percentage change
             random_factor = random.uniform(0.8, 1.2)
             lag_factor = 0.85  # Equity responds slower than BTC price
             
@@ -132,32 +150,31 @@ def simulate_mt5_equity_data(timeframe='5h', btc_data=None):
             
             equity_data.append({
                 'timestamp': btc_point['timestamp'],
-                'equity': equity
+                'equity': round(equity, 2)
             })
     
     return equity_data
 
-# Function to generate plots
-def generate_plots(btc_price=None, equity=None, refresh=True):
+# Function to generate live plots
+def generate_plots(btc_price=None, equity=None):
+    """Generate plots for the main dashboard"""
     if btc_price is None:
         btc_price = fetch_btc_price()
     
     if equity is None:
-        # Simulate an equity value that correlates with BTC price
-        import random
-        base = 10000
-        variation = (btc_price % 100) / 10  # Use last 2 digits of BTC price to create variation
-        equity = base + (variation * random.uniform(0.8, 1.2) * 100)
+        equity = simulate_mt5_equity(btc_price)
     
     # Create subplot with 2 rows
     fig = make_subplots(rows=2, cols=1, 
                         vertical_spacing=0.08,
                         subplot_titles=("BTC Price", "MT5 Account Equity"))
     
+    current_time = datetime.now()
+    
     # Add BTC price trace to the first row
     fig.add_trace(
         go.Scatter(
-            x=[datetime.now()],
+            x=[current_time],
             y=[btc_price],
             mode='lines',
             name='BTC Price',
@@ -169,7 +186,7 @@ def generate_plots(btc_price=None, equity=None, refresh=True):
     # Add equity trace to the second row
     fig.add_trace(
         go.Scatter(
-            x=[datetime.now()],
+            x=[current_time],
             y=[equity],
             mode='lines',
             name='MT5 Equity',
@@ -202,12 +219,13 @@ def generate_plots(btc_price=None, equity=None, refresh=True):
     return json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
 
 # Function to generate historical plots
-def generate_historical_plots(timeframe='5h', chart_type='line', interval='5m'):
-    # Get historical BTC data directly from Binance
+def generate_historical_plots(timeframe='5', chart_type='line', interval='5m'):
+    """Generate historical data plots"""
+    # Get historical BTC data from Binance
     btc_data = fetch_historical_btc_data(timeframe=timeframe)
     
     # Simulate MT5 equity data based on BTC data
-    equity_data = simulate_mt5_equity_data(timeframe=timeframe, btc_data=btc_data)
+    equity_data = simulate_mt5_equity_data(btc_data)
     
     # Create subplot with 2 rows
     fig = make_subplots(rows=2, cols=1, 
@@ -218,17 +236,7 @@ def generate_historical_plots(timeframe='5h', chart_type='line', interval='5m'):
     timestamps = [datetime.fromtimestamp(point['timestamp']) for point in btc_data]
     
     if chart_type == 'candlestick' and len(btc_data) > 0:
-        # Group data into candlesticks based on interval
-        interval_seconds = {
-            '1m': 60,
-            '3m': 3 * 60,
-            '5m': 5 * 60,
-            '15m': 15 * 60,
-            '30m': 30 * 60,
-            '1h': 60 * 60
-        }.get(interval, 300)  # Default to 5 minutes
-        
-        # For candlestick, we already have OHLC data directly from Binance
+        # For candlestick chart, we already have OHLC data from Binance
         open_prices = [point['open'] for point in btc_data]
         high_prices = [point['high'] for point in btc_data]
         low_prices = [point['low'] for point in btc_data]
@@ -315,6 +323,7 @@ def generate_historical_plots(timeframe='5h', chart_type='line', interval='5m'):
 # Route for main page
 @app.route('/')
 def index():
+    btc_position = simulate_btc_position()
     return render_template('index.html', btc_position=btc_position)
 
 # Route for historical data view
@@ -325,28 +334,17 @@ def history():
 # API endpoint for updating chart data
 @app.route('/update-data')
 def update_data():
-    global last_btc_price, last_equity, btc_position
+    global last_btc_price
     
     # Fetch BTC price from Binance
     btc_price = fetch_btc_price()
     last_btc_price = btc_price  # Update the last known price
     
-    # Simulate MT5 equity (varies with BTC price in a realistic way)
-    import random
-    import math
-    base_equity = 10000
-    time_component = math.sin(datetime.now().timestamp() / 1800)  # 30-minute cycle
-    price_factor = (btc_price % 1000) / 1000  # Use the last 3 digits of BTC price
+    # Simulate MT5 equity
+    equity = simulate_mt5_equity(btc_price)
     
-    # Combine factors for a realistic, correlated movement
-    equity = base_equity * (1 + (time_component * 0.02) + (price_factor * 0.04))
-    last_equity = equity
-    
-    # Generate a random position occasionally to simulate trading
-    if random.random() < 0.05:  # 5% chance of position change
-        positions = ["Buy", "Sell", "No Position"]
-        weights = [0.3, 0.2, 0.5]  # Weighted probabilities
-        btc_position = random.choices(positions, weights=weights, k=1)[0]
+    # Simulate a BTC position
+    btc_position = simulate_btc_position()
     
     # Create position color mapping
     position_color = {
@@ -370,7 +368,7 @@ def update_data():
 # API endpoint for getting historical data
 @app.route('/historical-data')
 def historical_data():
-    timeframe = request.args.get('timeframe', '5h')
+    timeframe = request.args.get('timeframe', '5')
     chart_type = request.args.get('chart_type', 'line')
     interval = request.args.get('interval', '5m')
     
