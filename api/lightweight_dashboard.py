@@ -397,16 +397,20 @@ def update_data():
         "No Position": "#9E9E9E"  # Grey
     }.get(btc_position, "#9E9E9E")
     
-    # Generate the plot
-    graph_json = generate_plots(btc_price=btc_price, equity=equity)
+    # We don't need to generate the plot anymore as we'll build it client-side
+    # This is just here for backwards compatibility
+    graph_json = "{}"
+    
+    # Get current timestamp formatted for display
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     return jsonify({
         'btc_price': btc_price,
         'equity': equity,
         'position': btc_position,
         'position_color': position_color,
-        'graph': graph_json,
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'graph': graph_json,  # Empty placeholder, not used anymore
+        'timestamp': current_time
     })
 
 # API endpoint for getting historical data
