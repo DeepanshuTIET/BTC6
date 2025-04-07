@@ -47,20 +47,31 @@ def fetch_btc_price():
 # Function to simulate MT5 equity based on BTC price
 def simulate_mt5_equity(btc_price):
     """Generate simulated MT5 equity value correlated with BTC price"""
+    # Fixed base equity that doesn't grow without bounds
     base_equity = 10000
     
     # Make equity generally follow BTC trend but with lower volatility
-    # Use time to create a slightly different pattern from BTC
-    time_factor = math.cos(datetime.now().timestamp() / 3600) * 0.01  # 1-hour cycle
+    time_component = math.cos(datetime.now().timestamp() / 3600) * 0.01  # 1-hour cycle
     
-    # Use price trending (normalize the price by a large factor)
-    price_influence = ((btc_price / 10000) - 6) * 0.02  # Gives ~2% influence from BTC price changes
+    # Normalize BTC price to a reasonable range (64k-68k)
+    # This ensures price changes have the right effect without causing extreme values
+    normalized_btc = max(min(btc_price, 68000), 64000)  # Clamp between 64k-68k
+    price_factor = ((normalized_btc - 64000) / 4000)  # 0-1 range based on BTC variation
+    price_influence = price_factor * 0.02  # Max 2% influence
     
-    # Make equity generally increase over time (simulating profitable trading)
-    time_uptrend = (datetime.now().timestamp() % 86400) / 86400 * 0.03  # 0-3% daily uptrend
+    # Small uptrend based on time - max 1% per day
+    seconds_since_midnight = (datetime.now().timestamp() % 86400) 
+    daily_cycle = seconds_since_midnight / 86400  # 0-1 range
+    time_uptrend = daily_cycle * 0.01  # 0-1% range
     
-    # Combine all factors
-    equity = base_equity * (1 + price_influence + time_factor + time_uptrend)
+    # Combine all factors with limits to prevent extreme values
+    change_pct = time_component + price_influence + time_uptrend
+    change_pct = max(min(change_pct, 0.05), -0.03)  # Limit to -3% to +5%
+    
+    equity = base_equity * (1 + change_pct)
+    
+    # Apply an absolute limit to prevent any possibility of extreme values
+    equity = max(min(equity, 12000), 9500)
     
     return round(equity, 2)
 
