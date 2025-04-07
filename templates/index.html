@@ -39,44 +39,28 @@
         .nav-link:hover {
             background-color: #2a2a2a;
         }
-        .chart-box {
-            height: 300px;
-            background-color: #1e1e1e;
-            border-radius: 8px;
-            padding: 15px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-            margin-bottom: 20px;
-        }
         #position-indicator {
             font-size: 24px;
             font-weight: bold;
             margin: 20px 0;
-            text-align: center;
-            padding: 15px;
-            border-radius: 8px;
+        }
+        #chart-container {
+            height: 800px;
             background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 20px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         }
         #status-message {
             color: #ff9900;
             margin-top: 10px;
             font-style: italic;
-            text-align: center;
         }
         .loading {
             display: inline-block;
             margin-left: 10px;
             font-size: 14px;
             color: #999;
-        }
-        .data-value {
-            font-size: 16px;
-            margin: 10px 0;
-            background-color: #333;
-            padding: 8px 12px;
-            border-radius: 4px;
-            display: inline-block;
-            margin-right: 10px;
         }
     </style>
 </head>
@@ -87,215 +71,61 @@
             <a href="/history" class="nav-link">View Historical Data</a>
         </div>
         <h2>BTC Price & MT5 Equity</h2>
-        
-        <!-- BTC Price Chart -->
-        <div class="chart-box">
-            <div id="btc-chart"></div>
+        <div id="chart-container">
+            <div id="plotly-chart"></div>
         </div>
-        
-        <!-- MT5 Equity Chart -->
-        <div class="chart-box">
-            <div id="equity-chart"></div>
-        </div>
-        
-        <!-- Position indicator with prominent display -->
         <div id="position-indicator">BTC Position: {{ btc_position }}</div>
-        
-        <!-- Current values display -->
-        <div style="text-align: center; margin: 15px 0;">
-            <div class="data-value" id="current-btc">BTC: Loading...</div>
-            <div class="data-value" id="current-equity">Equity: Loading...</div>
-        </div>
-        
-        <div id="status-message">Connecting to API...</div>
+        <div id="status-message">Connected to MetaAPI using real account data (Deepanshu Goyal - GTCGlobalTrade)</div>
     </div>
 
     <script>
-        // Data arrays for storing time series
-        let btcData = {
-            x: [],
-            y: [],
-            type: 'scatter',
-            mode: 'lines',
-            name: 'BTC Price',
-            line: { color: '#F2A900', width: 3 }
-        };
+        let chart;
+        let firstLoad = true;
         
-        let equityData = {
-            x: [],
-            y: [],
-            type: 'scatter',
-            mode: 'lines',
-            name: 'MT5 Equity',
-            line: { color: '#3D9970', width: 3 }
-        };
-        
-        // Initialize the charts
-        function initCharts() {
-            // BTC Chart
-            const btcLayout = {
-                title: 'BTC Price (USDT)',
-                paper_bgcolor: '#1e1e1e',
-                plot_bgcolor: '#1e1e1e',
-                font: { color: '#ffffff' },
-                xaxis: {
-                    title: 'Time',
-                    showgrid: true,
-                    gridcolor: '#333',
-                    gridwidth: 1
-                },
-                yaxis: {
-                    title: 'Price (USDT)',
-                    showgrid: true,
-                    gridcolor: '#333',
-                    gridwidth: 1,
-                    autorange: true,  // Ensure it adapts to actual BTC price
-                    tickformat: ',.0f'  // Format large numbers without scientific notation
-                },
-                margin: { l: 60, r: 30, t: 30, b: 40 },
-                autosize: true
-            };
-            
-            // Equity Chart
-            const equityLayout = {
-                title: 'MT5 Account Equity (USD)',
-                paper_bgcolor: '#1e1e1e',
-                plot_bgcolor: '#1e1e1e',
-                font: { color: '#ffffff' },
-                xaxis: {
-                    title: 'Time',
-                    showgrid: true,
-                    gridcolor: '#333',
-                    gridwidth: 1
-                },
-                yaxis: {
-                    title: 'Equity (USD)',
-                    showgrid: true,
-                    gridcolor: '#333',
-                    gridwidth: 1,
-                    autorange: true
-                },
-                margin: { l: 60, r: 30, t: 30, b: 40 },
-                autosize: true
-            };
-            
-            // Create initial empty charts
-            Plotly.newPlot('btc-chart', [btcData], btcLayout);
-            Plotly.newPlot('equity-chart', [equityData], equityLayout);
-        }
-        
-        // Function to update data from API
-        function fetchData() {
+        // Function to update the chart
+        function updateChart() {
             $('#status-message').html('Updating data <span class="loading">•••</span>');
-            
-            $.ajax({
-                url: '/update-data',
-                type: 'GET',
-                dataType: 'json',
-                success: function(data) {
-                    const now = new Date();
-                    
-                    // Update current values display
-                    $('#current-btc').text('BTC: $' + data.btc_price.toLocaleString());
-                    $('#current-equity').text('Equity: $' + data.equity.toLocaleString());
-                    
-                    // Add data points
-                    btcData.x.push(now);
-                    btcData.y.push(data.btc_price);
-                    
-                    equityData.x.push(now);
-                    equityData.y.push(data.equity);
-                    
-                    // Keep only the last 30 data points for performance
-                    const MAX_POINTS = 30;
-                    if (btcData.x.length > MAX_POINTS) {
-                        btcData.x = btcData.x.slice(-MAX_POINTS);
-                        btcData.y = btcData.y.slice(-MAX_POINTS);
-                        equityData.x = equityData.x.slice(-MAX_POINTS);
-                        equityData.y = equityData.y.slice(-MAX_POINTS);
+            $.getJSON('/update-data', function(data) {
+                // Use newPlot only on first load, then update instead for better performance
+                if (firstLoad) {
+                    chart = JSON.parse(data.graph);
+                    Plotly.newPlot('plotly-chart', chart);
+                    firstLoad = false;
+                } else {
+                    try {
+                        // Parse the new chart data
+                        const chartData = JSON.parse(data.graph);
+                        
+                        // Create a more robust update with explicit data points
+                        const updateData = {
+                            x: [[...chartData.data[0].x], [...chartData.data[1].x]],
+                            y: [[...chartData.data[0].y], [...chartData.data[1].y]]
+                        };
+                        
+                        // Update the plot with new data
+                        Plotly.update('plotly-chart', updateData);
+                    } catch (e) {
+                        console.error('Error updating chart:', e);
+                        // Fall back to complete redraw if update fails
+                        chart = JSON.parse(data.graph);
+                        Plotly.newPlot('plotly-chart', chart);
                     }
-                    
-                    // Update charts with new data
-                    Plotly.animate('btc-chart', {
-                        data: [{ x: btcData.x, y: btcData.y }]
-                    }, {
-                        transition: { duration: 300 },
-                        frame: { duration: 300, redraw: true }
-                    });
-                    
-                    Plotly.animate('equity-chart', {
-                        data: [{ x: equityData.x, y: equityData.y }]
-                    }, {
-                        transition: { duration: 300 },
-                        frame: { duration: 300, redraw: true }
-                    });
-                    
-                    // Update position indicator
-                    updatePositionIndicator(data.position);
-                    
-                    // Update status message
-                    $('#status-message').html('Connected to API - Last update: ' + now.toLocaleTimeString());
-                    
-                    console.log('Data updated:', { 
-                        time: now.toLocaleTimeString(),
-                        btc: data.btc_price,
-                        equity: data.equity,
-                        position: data.position
-                    });
-                },
-                error: function(error) {
-                    console.error('Error fetching data:', error);
-                    $('#status-message').html('Error updating data. Will try again soon.');
                 }
+                
+                $('#position-indicator').text('BTC Position: ' + data.position);
+                $('#position-indicator').css('color', data.position_color);
+                $('#status-message').html('Connected to MetaAPI - BTC updates every 1s, MT5 updates every 2.5s');
+            })
+            .fail(function() {
+                $('#status-message').html('Error updating data. Will try again in 1 second.');
             });
         }
-        
-        // Function to update position indicator with proper styling
-        function updatePositionIndicator(position) {
-            let bgColor, textColor;
-            
-            switch(position) {
-                case 'Buy':
-                    bgColor = '#3D9970'; // Green
-                    textColor = '#FFFFFF';
-                    break;
-                case 'Sell':
-                    bgColor = '#FF4136'; // Red
-                    textColor = '#FFFFFF';
-                    break;
-                default: // No Position
-                    bgColor = '#555555'; // Gray
-                    textColor = '#FFFFFF';
-            }
-            
-            $('#position-indicator').text('BTC Position: ' + position);
-            $('#position-indicator').css({
-                'background-color': bgColor,
-                'color': textColor,
-                'border': '2px solid ' + bgColor
-            });
-        }
-        
-        // Initialize and start data updates
-        $(document).ready(function() {
-            // Initialize charts
-            initCharts();
-            
-            // Update position indicator for initial state
-            updatePositionIndicator('{{ btc_position }}');
-            
-            // Fetch data immediately
-            fetchData();
-            
-            // Set up interval for updates
-            setInterval(fetchData, 1000);
-            
-            // Handle window resize for responsive charts
-            $(window).resize(function() {
-                Plotly.Plots.resize('btc-chart');
-                Plotly.Plots.resize('equity-chart');
-            });
-        });
+
+        // Initial chart load
+        updateChart();
+
+        // Update every 1 second
+        setInterval(updateChart, 1000);
     </script>
 </body>
 </html>
