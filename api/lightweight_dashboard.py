@@ -31,24 +31,37 @@ position_weights = [0.3, 0.2, 0.5]  # Weighted probabilities
 # Function to fetch BTC price
 def fetch_btc_price():
     """Fetch current BTC price from Binance API"""
+    global last_btc_price
     try:
         response = requests.get(BINANCE_API_URL)
         data = response.json()
-        return float(data['price'])
+        price = float(data['price'])
+        last_btc_price = price  # Update last known price
+        return price
     except Exception as e:
         print(f"Error fetching BTC price: {e}")
-        # Return last known price or a reasonable default
-        return last_btc_price if last_btc_price else 20000.0
+        # Return last known price if we have one, otherwise a more realistic default
+        # Based on current market conditions (≈65k in April 2025)
+        return last_btc_price if last_btc_price else 65000.0
 
 # Function to simulate MT5 equity based on BTC price
 def simulate_mt5_equity(btc_price):
     """Generate simulated MT5 equity value correlated with BTC price"""
     base_equity = 10000
-    time_component = math.sin(datetime.now().timestamp() / 1800)  # 30-minute cycle
-    price_factor = (btc_price % 1000) / 1000  # Use the last 3 digits
     
-    # Combine factors for a realistic, correlated movement
-    equity = base_equity * (1 + (time_component * 0.02) + (price_factor * 0.04))
+    # Make equity generally follow BTC trend but with lower volatility
+    # Use time to create a slightly different pattern from BTC
+    time_factor = math.cos(datetime.now().timestamp() / 3600) * 0.01  # 1-hour cycle
+    
+    # Use price trending (normalize the price by a large factor)
+    price_influence = ((btc_price / 10000) - 6) * 0.02  # Gives ~2% influence from BTC price changes
+    
+    # Make equity generally increase over time (simulating profitable trading)
+    time_uptrend = (datetime.now().timestamp() % 86400) / 86400 * 0.03  # 0-3% daily uptrend
+    
+    # Combine all factors
+    equity = base_equity * (1 + price_influence + time_factor + time_uptrend)
+    
     return round(equity, 2)
 
 # Function to determine BTC position based on price movement
