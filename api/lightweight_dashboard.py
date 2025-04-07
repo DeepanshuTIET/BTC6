@@ -51,11 +51,55 @@ def simulate_mt5_equity(btc_price):
     equity = base_equity * (1 + (time_component * 0.02) + (price_factor * 0.04))
     return round(equity, 2)
 
-# Function to simulate BTC position
+# Function to simulate BTC position based on BTC price pattern
 def simulate_btc_position():
-    """Simulate BTC position (Buy, Sell, No Position)"""
-    # Use weighted random choice
-    return random.choices(positions, weights=position_weights, k=1)[0]
+    """Generate a more consistent BTC position based on price pattern"""
+    try:
+        # Get recent BTC prices to determine trend
+        params = {
+            'symbol': 'BTCUSDT',
+            'interval': '1m',  # 1-minute candles
+            'limit': 5  # Last 5 candles
+        }
+        response = requests.get(BINANCE_KLINE_URL, params=params)
+        data = response.json()
+        
+        if len(data) >= 3:
+            # Extract closing prices from the most recent candles
+            closes = [float(candle[4]) for candle in data[-3:]]
+            
+            # Calculate simple trend based on last 3 candles
+            price_diff = closes[-1] - closes[0]
+            price_change_pct = price_diff / closes[0] * 100
+            
+            # Determine position based on trend and some randomness for stability
+            now = datetime.now().timestamp()
+            minutes = int(now / 60)
+            
+            # Use the current minute as part of the deterministic factor
+            # This will keep the position stable for a minute at least
+            seed_value = minutes + int(abs(price_change_pct) * 10)
+            random.seed(seed_value)
+            
+            if price_change_pct > 0.05:  # Price rising
+                position_weights = [0.7, 0.1, 0.2]  # Higher chance for Buy
+            elif price_change_pct < -0.05:  # Price falling
+                position_weights = [0.1, 0.7, 0.2]  # Higher chance for Sell
+            else:  # Sideways
+                position_weights = [0.3, 0.3, 0.4]  # More balanced with slight preference for No Position
+            
+            # Make the choice with our seeded random generator
+            position = random.choices(positions, weights=position_weights, k=1)[0]
+            
+            # Reset the random seed after use
+            random.seed()
+            return position
+        
+    except Exception as e:
+        print(f"Error determining position: {e}")
+    
+    # Default to random if we couldn't determine a consistent position
+    return random.choices(positions, weights=[0.3, 0.2, 0.5], k=1)[0]
 
 # Function to get historical BTC data from Binance
 def fetch_historical_btc_data(timeframe='5h'):
