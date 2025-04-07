@@ -51,55 +51,58 @@ def simulate_mt5_equity(btc_price):
     equity = base_equity * (1 + (time_component * 0.02) + (price_factor * 0.04))
     return round(equity, 2)
 
-# Function to simulate BTC position based on BTC price pattern
+# Function to determine BTC position based on price movement
 def simulate_btc_position():
-    """Generate a more consistent BTC position based on price pattern"""
+    """Determine BTC position based on recent price movement"""
     try:
         # Get recent BTC prices to determine trend
         params = {
             'symbol': 'BTCUSDT',
             'interval': '1m',  # 1-minute candles
-            'limit': 5  # Last 5 candles
+            'limit': 10  # Look at 10 recent candles for better trend identification
         }
         response = requests.get(BINANCE_KLINE_URL, params=params)
         data = response.json()
         
-        if len(data) >= 3:
-            # Extract closing prices from the most recent candles
-            closes = [float(candle[4]) for candle in data[-3:]]
+        if len(data) >= 5:
+            # Extract closing prices from the candles
+            closes = [float(candle[4]) for candle in data]
             
-            # Calculate simple trend based on last 3 candles
-            price_diff = closes[-1] - closes[0]
-            price_change_pct = price_diff / closes[0] * 100
+            # Calculate trend using simple moving averages
+            short_ma = sum(closes[-3:]) / 3  # 3-period MA
+            long_ma = sum(closes[-8:]) / 8   # 8-period MA
             
-            # Determine position based on trend and some randomness for stability
-            now = datetime.now().timestamp()
-            minutes = int(now / 60)
+            # Calculate price momentum
+            momentum = (closes[-1] / closes[-5] - 1) * 100  # 5-period price change %
             
-            # Use the current minute as part of the deterministic factor
-            # This will keep the position stable for a minute at least
-            seed_value = minutes + int(abs(price_change_pct) * 10)
-            random.seed(seed_value)
+            # Determine position based on MA crossover and momentum
+            # This will create a more consistent trading signal
+            current_minute = int(datetime.now().minute)
             
-            if price_change_pct > 0.05:  # Price rising
-                position_weights = [0.7, 0.1, 0.2]  # Higher chance for Buy
-            elif price_change_pct < -0.05:  # Price falling
-                position_weights = [0.1, 0.7, 0.2]  # Higher chance for Sell
-            else:  # Sideways
-                position_weights = [0.3, 0.3, 0.4]  # More balanced with slight preference for No Position
+            # Use a combination of current minute and price to ensure position consistency
+            # This ensures same position for a reasonable time period
+            position_seed = int(current_minute / 5)  # Changes every 5 minutes
+            random.seed(position_seed + int(closes[-1]) % 10)  # Add some price influence
             
-            # Make the choice with our seeded random generator
-            position = random.choices(positions, weights=position_weights, k=1)[0]
+            if short_ma > long_ma and momentum > 0.1:
+                # Strong uptrend - high chance of Buy
+                position = random.choices(positions, weights=[0.85, 0.05, 0.1], k=1)[0]
+            elif short_ma < long_ma and momentum < -0.1:
+                # Strong downtrend - high chance of Sell
+                position = random.choices(positions, weights=[0.05, 0.85, 0.1], k=1)[0]
+            else:
+                # Sideways or unclear trend
+                position = random.choices(positions, weights=[0.25, 0.25, 0.5], k=1)[0]
             
-            # Reset the random seed after use
+            # Reset random seed
             random.seed()
             return position
-        
+            
     except Exception as e:
         print(f"Error determining position: {e}")
     
-    # Default to random if we couldn't determine a consistent position
-    return random.choices(positions, weights=[0.3, 0.2, 0.5], k=1)[0]
+    # Default to No Position if we couldn't determine a trend
+    return "No Position"
 
 # Function to get historical BTC data from Binance
 def fetch_historical_btc_data(timeframe='5h'):
