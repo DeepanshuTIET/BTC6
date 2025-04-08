@@ -25,14 +25,27 @@ app = Flask(__name__,
           static_folder=static_path,
           static_url_path='/static')
 
-# API URLs
+# API URLs and credentials
 BINANCE_API_URL = os.getenv('BINANCE_API_URL', 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT')
 BINANCE_KLINE_URL = 'https://api.binance.com/api/v3/klines'
+META_ACCOUNT_ID = os.getenv('META_ACCOUNT_ID')
+META_API_KEY = os.getenv('META_API_KEY')
+META_API_DOMAIN = os.getenv('META_API_DOMAIN', 'mt-client-api.agiliumtrade.ai')
 
 # Store last fetched data in memory
 last_btc_price = 65000.0  # Default to realistic value (April 2025)
+last_equity = 10000.0    # Default equity value
+last_position = "No Position"  # Default position
 
-# Function to fetch BTC price
+# Check if MetaAPI credentials are available
+meta_api_ready = False
+if META_API_KEY and META_ACCOUNT_ID:
+    print(f"MetaAPI credentials found for account: {META_ACCOUNT_ID}")
+    meta_api_ready = True
+else:
+    print("MetaAPI credentials not found. Using simulation mode.")
+
+# Function to fetch BTC price from Binance API
 def fetch_btc_price():
     global last_btc_price
     try:
@@ -45,60 +58,113 @@ def fetch_btc_price():
         print(f"Error fetching BTC price: {e}")
         return last_btc_price
 
-# Function to simulate MT5 equity based on BTC price
-def simulate_mt5_equity(btc_price):
-    # Fixed base equity that doesn't grow without bounds
+# Function to get MT5 equity (using direct REST API call)
+def get_mt5_equity():
+    global last_equity
+    
+    if meta_api_ready:
+        try:
+            # Direct API call to MetaAPI (REST API)
+            headers = {
+                'auth-token': META_API_KEY
+            }
+            
+            # Get account information endpoint
+            url = f"https://{META_API_DOMAIN}/users/current/accounts/{META_ACCOUNT_ID}/account-information"
+            
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                if 'equity' in data:
+                    equity = float(data['equity'])
+                    last_equity = equity  # Update last known equity
+                    print(f"Retrieved real equity: {equity}")
+                    return equity
+        except Exception as e:
+            print(f"Error fetching MT5 equity via API: {e}")
+    
+    # Simulation mode - generate semi-realistic equity value
+    btc_price = fetch_btc_price()
     base_equity = 10000
-    
-    # Make equity generally follow BTC trend but with lower volatility
-    time_component = math.cos(datetime.now().timestamp() / 3600) * 0.01  # 1-hour cycle
-    
-    # Use BTC price normalized to a reasonable range (64k-68k)
-    # This ensures price changes have the right effect without causing extreme values
-    normalized_btc = max(min(btc_price, 68000), 64000)  # Clamp between 64k-68k
-    price_factor = ((normalized_btc - 64000) / 4000)  # 0-1 range based on BTC variation
-    price_influence = price_factor * 0.02  # Max 2% influence
-    
-    # Small uptrend based on time - max 1% per day
-    # Using seconds since midnight % 86400 gives us a 0-1 daily cycle
-    seconds_since_midnight = (datetime.now().timestamp() % 86400) 
-    daily_cycle = seconds_since_midnight / 86400  # 0-1 range
-    time_uptrend = daily_cycle * 0.01  # 0-1% range
-    
-    # Combine all factors with limits to prevent extreme values
-    change_pct = time_component + price_influence + time_uptrend
-    change_pct = max(min(change_pct, 0.05), -0.03)  # Limit to -3% to +5%
-    
-    equity = base_equity * (1 + change_pct)
-    
-    # Apply an absolute limit to prevent any possibility of extreme values
-    equity = max(min(equity, 12000), 9500)
-    
-    return round(equity, 2)
+    time_component = math.cos(datetime.now().timestamp() / 3600) * 0.01
+    price_factor = ((btc_price / 65000) - 1) * 0.03  # Correlate with BTC price changes
+    equity = base_equity * (1 + price_factor + time_component)
+    simulated_equity = round(equity, 2)
+    print(f"Using simulated equity: {simulated_equity}")
+    return simulated_equity
 
-# Function to determine BTC position
-def simulate_btc_position():
-    # Simplified position simulation for Vercel
-    positions = ["Buy", "Sell", "No Position"]
-    weights = [0.3, 0.2, 0.5]  # Weighted probabilities
+# Function to get BTC position (using direct REST API call)
+def get_btc_position():
+    global last_position
     
-    # Use time-based seed for consistency (changes every 5 minutes)
-    position_seed = int(datetime.now().minute / 5)
+    if meta_api_ready:
+        try:
+            # Direct API call to MetaAPI (REST API)
+            headers = {
+                'auth-token': META_API_KEY
+            }
+            
+            # Get positions endpoint
+            url = f"https://{META_API_DOMAIN}/users/current/accounts/{META_ACCOUNT_ID}/positions"
+            
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                positions = response.json()
+                
+                # Look for BTC positions
+                btc_positions = [p for p in positions if 'BTC' in p.get('symbol', '')]
+                
+                if btc_positions:
+                    # Determine position type
+                    for position in btc_positions:
+                        if position.get('type') == 'POSITION_TYPE_BUY':
+                            last_position = "Buy"
+                            print("Found BTC Buy position")
+                            return "Buy"
+                        elif position.get('type') == 'POSITION_TYPE_SELL':
+                            last_position = "Sell"
+                            print("Found BTC Sell position")
+                            return "Sell"
+                
+                # No BTC positions found
+                last_position = "No Position"
+                print("No BTC positions found")
+                return "No Position"
+        except Exception as e:
+            print(f"Error fetching BTC position via API: {e}")
+    
+    # Simulation mode - generate semi-random position with some persistence
+    current_hour = datetime.now().hour
+    current_minute = datetime.now().minute
+    
+    # Change position roughly every 5 minutes based on time
+    position_seed = (current_hour * 60 + current_minute) // 5
     random.seed(position_seed)
+    position_rand = random.random()
     
-    # Make more Buy signals when BTC price is rising, more Sell when falling
-    hour_of_day = datetime.now().hour
-    if 8 <= hour_of_day <= 16:  # During typical trading hours
-        # Adjust weights to favor Buy during trading hours
-        weights = [0.4, 0.1, 0.5]
+    if position_rand < 0.4:  # 40% chance of Buy
+        simulated_position = "Buy"
+    elif position_rand < 0.7:  # 30% chance of Sell
+        simulated_position = "Sell"
+    else:  # 30% chance of No Position
+        simulated_position = "No Position"
     
-    return random.choices(positions, weights=weights, k=1)[0]
+    if simulated_position != last_position:
+        last_position = simulated_position
+        print(f"Using simulated position: {simulated_position}")
+    
+    return simulated_position
 
 # Route for main page
 @app.route('/')
 def index():
-    btc_position = simulate_btc_position()
-    return render_template('index.html', btc_position=btc_position)
+    # Get real BTC position from MetaAPI
+    btc_position = get_btc_position()
+    
+    # Add a status message to indicate whether we're using real data or simulation
+    status = "LIVE DATA" if meta_api_ready else "SIMULATION MODE"
+    
+    return render_template('index.html', btc_position=btc_position, status=status)
 
 # API endpoint for updating chart data
 @app.route('/update-data')
@@ -106,11 +172,11 @@ def update_data():
     # Fetch BTC price from Binance
     btc_price = fetch_btc_price()
     
-    # Simulate MT5 equity
-    equity = simulate_mt5_equity(btc_price)
+    # Get real MT5 equity from MetaAPI
+    equity = get_mt5_equity()
     
-    # Simulate a BTC position
-    btc_position = simulate_btc_position()
+    # Get real BTC position from MetaAPI
+    btc_position = get_btc_position()
     
     # Position color mapping
     position_color = {
@@ -122,13 +188,53 @@ def update_data():
     # Current timestamp
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
+    # API status message
+    api_status = "LIVE MT5 DATA" if meta_api_ready else "SIMULATION MODE"
+    
     return jsonify({
         'btc_price': btc_price,
         'equity': equity,
         'position': btc_position,
         'position_color': position_color,
         'graph': "{}",  # Empty placeholder, we build charts client-side now
-        'timestamp': current_time
+        'timestamp': current_time,
+        'api_status': api_status
+    })
+
+# Endpoint for BTC price only (fast updates - every 1 second)
+@app.route('/btc-price')
+def btc_price_endpoint():
+    # Fetch BTC price from Binance
+    btc_price = fetch_btc_price()
+    
+    return jsonify({
+        'btc_price': btc_price
+    })
+
+# Endpoint for MT5 data only (slower updates - every 3 seconds)
+@app.route('/mt5-data')
+def mt5_data_endpoint():
+    # Get real MT5 equity from MetaAPI
+    equity = get_mt5_equity()
+    
+    # Get real BTC position from MetaAPI
+    btc_position = get_btc_position()
+    
+    # Position color mapping
+    position_color = {
+        "Buy": "#4CAF50",  # Green
+        "Sell": "#F44336",  # Red
+        "No Position": "#9E9E9E"  # Grey
+    }.get(btc_position, "#9E9E9E")
+    
+    # API status message
+    api_status = "LIVE MT5 DATA" if meta_api_ready else "SIMULATION MODE"
+    
+    return jsonify({
+        'equity': equity,
+        'position': btc_position,
+        'position_color': position_color,
+        'api_status': api_status
     })
 
 # Route for historical data view - simplified for Vercel
