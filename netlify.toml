@@ -1,0 +1,13 @@
+[build]
+  # Publish the root directory as static site
+  publish = "."
+  # Explicitly disable build command
+  command = ""
+
+# Specify headers to ensure proper caching and security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    Cache-Control = "public, max-age=300, s-maxage=600"

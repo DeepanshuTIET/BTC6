@@ -8,11 +8,14 @@ from plotly.subplots import make_subplots
 import requests
 import threading
 import os
+import logging
 from metaapi_cloud_sdk import MetaApi
 from flask import Flask, render_template, jsonify, request
 from db_handler import DatabaseHandler
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from api.meta_api_streaming import MetaApiStreamingManager
+from api.position_tracker import position_tracker
 
 # Load environment variables from .env file
 load_dotenv()
@@ -43,6 +46,13 @@ btc_position = "No Position"
 db_path = os.getenv('DB_PATH', 'crypto_dashboard.db')
 db = DatabaseHandler(db_path=db_path)
 
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('dashboard')
+
+# Initialize MetaAPI streaming manager
+meta_api_streaming = MetaApiStreamingManager()
+
 # Connection status flags
 connecting_in_progress = False
 last_connection_attempt = 0
@@ -58,128 +68,57 @@ def fetch_btc_price():
         print(f"Error fetching BTC price: {e}")
         return 0
 
-# Function to check BTC position in MT5
-async def check_btc_position(api, account):
-    positions = await account.get_positions()
-    for position in positions:
-        if position['symbol'].startswith('BTC'):
-            return "Buy" if position['type'] == 'POSITION_TYPE_BUY' else "Sell"
-    return "No Position"
+# Function to check BTC position in MT5 using improved position tracker
+async def check_btc_position():
+    try:
+        # Use the enhanced position tracker for more accurate position data
+        position_data = await position_tracker.get_position_status()
+        
+        # Log the position data for debugging
+        logger.info(f"Current BTC position: {position_data['status']}")
+        if position_data['details']:
+            logger.info(f"Position details: {position_data['details']}")
+            
+        return position_data['status']
+    except Exception as e:
+        logger.error(f"Error checking BTC position: {e}")
+        return "No Position"
 
-# Function to fetch MT5 account equity
+# Function to fetch MT5 account equity using improved position tracker
 async def fetch_mt5_equity():
-    global btc_position, connection_pool, connecting_in_progress, last_connection_attempt
+    global btc_position
     
     try:
-        current_time = time.time()
+        # Get account information using enhanced position tracker
+        account_info = await position_tracker.get_account_information()
         
-        # Don't allow multiple simultaneous connection attempts
-        if connecting_in_progress:
-            if 'last_equity' in connection_pool:
-                return connection_pool['last_equity']
-            else:
-                # Simulate more visible data patterns with much larger variations
-                import math
-                simulated_equity = 10000 + 3000 * math.sin(current_time / 5)
-                return simulated_equity
-                
-        # Only retry connections after the retry interval
-        if (current_time - last_connection_attempt) < CONNECTION_RETRY_INTERVAL and 'connection_error' in connection_pool:
-            if 'last_equity' in connection_pool:
-                return connection_pool['last_equity']
-            else:
-                # Return simulated data during retry interval
-                import math
-                simulated_equity = 10000 + 500 * math.sin(current_time / 15)
-                return simulated_equity
-        
-        connecting_in_progress = True
-        last_connection_attempt = current_time
-        
-        # Reuse API instance if we have one
-        if 'api' not in connection_pool:
-            # Initialize with API key only (no options parameter)
-            connection_pool['api'] = MetaApi(META_API_KEY)
-            print("Created MetaAPI instance")
-        api = connection_pool['api']
-        
-        # Reuse account if we have one
-        if 'account' not in connection_pool:
-            try:
-                connection_pool['account'] = await api.metatrader_account_api.get_account(META_ACCOUNT_ID)
-                print(f"Connected to account ID: {META_ACCOUNT_ID}")
-            except Exception as acc_error:
-                print(f"Error connecting to account {META_ACCOUNT_ID}: {acc_error}")
-                connecting_in_progress = False
-                connection_pool['connection_error'] = str(acc_error)
-                raise Exception("Account not found")
-        account = connection_pool['account']
-        
-        # Check if account is deployed - only if we need to
-        if account.state not in ['DEPLOYING', 'DEPLOYED']:
-            print('Deploying account with dedicated IP')
-            await account.deploy(ACCOUNT_DEPLOY_OPTIONS)
-        
-        # Only wait_connected if not already connected
-        if not connection_pool.get('broker_connected', False):
-            print('Connecting to broker...')
-            await asyncio.wait_for(account.wait_connected(), timeout=15)
-            connection_pool['broker_connected'] = True
-        
-        # Reuse connection if we have one
-        if 'connection' not in connection_pool:
-            print("Creating new streaming connection with dedicated IP")
-            connection_pool['connection'] = account.get_streaming_connection()
-            await asyncio.wait_for(connection_pool['connection'].connect(), timeout=15)
+        if account_info:
+            # Check for BTC position
+            position_data = await position_tracker.get_position_status()
+            btc_position = position_data['status']
             
-            # Only synchronize once
-            print('Synchronizing with terminal state...')
-            await asyncio.wait_for(connection_pool['connection'].wait_synchronized(), timeout=15)
-            connection_pool['synchronized'] = True
-        
-        # Use the existing connection
-        connection = connection_pool['connection']
-        
-        # Access terminal state
-        terminal_state = connection.terminal_state
-        account_info = terminal_state.account_information
-        equity = account_info['equity'] if account_info else 0
-        
-        # Store the latest equity for use during connection issues
-        connection_pool['last_equity'] = equity
-        
-        # Check positions
-        positions = terminal_state.positions
-        btc_position = "No Position"
-        for position in positions:
-            if position['symbol'].startswith('BTC'):
-                btc_position = "Buy" if position['type'] == 'POSITION_TYPE_BUY' else "Sell"
-                break
-        
-        # Clear any previous connection errors
-        if 'connection_error' in connection_pool:
-            del connection_pool['connection_error']
+            # Log the account info for debugging
+            logger.info(f"MT5 account equity: {account_info.get('equity', 0)}")
             
-        # Connection completed successfully
-        connecting_in_progress = False
-        return equity
-    except Exception as e:
-        # Log error but don't spam the console with repetitive messages
-        if not connection_pool.get('connection_error') == str(e):
-            print(f"Error fetching MT5 equity: {e}")
-            connection_pool['connection_error'] = str(e)
+            # Return account balance/equity
+            return account_info.get('equity', account_info.get('balance', 0))
         
-        # Clear the connection flag
-        connecting_in_progress = False
-        
-        # Use last known equity if available, otherwise simulate
-        if 'last_equity' in connection_pool:
-            return connection_pool['last_equity']
         else:
-            import random
-            simulated_equity = random.uniform(9800, 10200)
-            connection_pool['last_equity'] = simulated_equity
+            logger.warning("No account information available, using fallback")
+            # Fallback to simulated data if no account info
+            import math
+            current_time = time.time()
+            simulated_equity = 10000 + 3000 * math.sin(current_time / 5)
+            logger.info(f"Using simulated equity: {simulated_equity}")
             return simulated_equity
+    
+    except Exception as e:
+        logger.error(f"Error fetching MT5 equity: {e}")
+        
+        # In case of error, use a simulated value
+        import math
+        simulated_equity = 10000 + 200 * math.sin(time.time() / 20)
+        return simulated_equity
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -333,28 +272,43 @@ def history():
 # API endpoint for updating chart data
 @app.route('/update-data')
 def update_data():
-    global btc_position
-    
-    fig = generate_plots()
-    graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-    
-    position_color = "#999999"  # gray
-    if btc_position == "Buy":
-        position_color = "#00CC00"  # bright green
-    elif btc_position == "Sell":
-        position_color = "#FF3333"  # bright red
-    
-    # Get latest values for display
-    latest_btc = btc_prices[-1] if btc_prices else 0
-    latest_equity = equity_values[-1] if equity_values else 0
-    
-    return jsonify({
-        'graph': graphJSON,
-        'position': btc_position,
-        'position_color': position_color,
-        'btc_price': f'${latest_btc:,.2f}',
-        'equity': f'${latest_equity:,.2f}'
-    })
+    try:
+        # Generate the plot data and position
+        graph = generate_plots()
+        graph_json = json.dumps(graph, cls=plotly.utils.PlotlyJSONEncoder)
+        
+        # Get position details if available
+        position_details = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            position_data = loop.run_until_complete(position_tracker.get_position_status())
+            position = position_data['status']
+            position_color = position_data['color']
+            position_details = position_data['details']
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error getting detailed position data: {e}")
+        
+        # Return the data as JSON with enhanced position information
+        return jsonify({
+            'graph': graph_json,
+            'position': position,
+            'position_color': position_color,
+            'position_details': position_details,
+            'btc_price': btc_prices[-1] if btc_prices else 0,
+            'equity': equity_values[-1] if equity_values else 0,
+            'timestamp': timestamps[-1] if timestamps else time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error in update_data: {e}")
+        return jsonify({
+            'error': str(e),
+            'graph': '{}',
+            'position': 'No Position',
+            'position_color': '#999999',
+            'position_details': None
+        })
 
 # API endpoint for getting historical data
 @app.route('/historical-data')
@@ -831,6 +785,15 @@ MAX_DATA_POINTS = int(os.getenv('MAX_DATA_POINTS', 120))  # Store 2 minutes of d
 def update_data_periodically():
     global btc_prices, equity_values, timestamps, btc_position, last_mt5_update
     
+    # Initialize MetaAPI streaming on startup
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(meta_api_streaming.connect_streaming(wait_for_sync=False))
+        logger.info("MetaAPI streaming initialized on startup")
+    except Exception as e:
+        logger.error(f"Error initializing MetaAPI streaming on startup: {e}")
+    
     while True:
         current_time = time.time()
         
@@ -843,10 +806,10 @@ def update_data_periodically():
             try:
                 db.save_btc_price(btc_price)
             except Exception as db_e:
-                print(f"Error saving BTC price to database: {db_e}")
+                logger.error(f"Error saving BTC price to database: {db_e}")
         except Exception as e:
             if not getattr(update_data_periodically, 'last_btc_error', '') == str(e):
-                print(f"Error fetching BTC price: {e}")
+                logger.error(f"Error fetching BTC price: {e}")
                 update_data_periodically.last_btc_error = str(e)
             btc_prices.append(btc_prices[-1] if btc_prices else 0)
         
@@ -864,16 +827,16 @@ def update_data_periodically():
                 equity = loop.run_until_complete(asyncio.wait_for(fetch_mt5_equity(), timeout=30))
                 equity_values.append(equity)
                 last_mt5_update = current_time
-                print(f"Updated MT5 equity at {time.strftime('%H:%M:%S', time.localtime())}")
+                logger.info(f"Updated MT5 equity at {time.strftime('%H:%M:%S', time.localtime())}")
                 
                 # Store MT5 equity in database for historical data
                 try:
                     db.save_mt5_equity(equity, btc_position)
                 except Exception as db_e:
-                    print(f"Error saving MT5 equity to database: {db_e}")
+                    logger.error(f"Error saving MT5 equity to database: {db_e}")
             except Exception as e:
                 if not getattr(update_data_periodically, 'last_mt5_error', '') == str(e):
-                    print(f"Error in MT5 update thread: {e}")
+                    logger.error(f"Error in MT5 update thread: {e}")
                     update_data_periodically.last_mt5_error = str(e)
                 equity_values.append(equity_values[-1] if equity_values else 0)
         else:
@@ -894,9 +857,18 @@ def update_data_periodically():
             try:
                 deleted_btc, deleted_mt5 = db.clean_old_data(max_days=7)
                 if deleted_btc > 0 or deleted_mt5 > 0:
-                    print(f"Cleaned old data: {deleted_btc} BTC records, {deleted_mt5} MT5 records")
+                    logger.info(f"Cleaned old data: {deleted_btc} BTC records, {deleted_mt5} MT5 records")
             except Exception as e:
-                print(f"Error cleaning old data: {e}")
+                logger.error(f"Error cleaning old data: {e}")
+        
+        # Periodically check MetaAPI connection (every 5 minutes)
+        if current_time % 300 < BTC_UPDATE_INTERVAL:
+            try:
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(meta_api_streaming.connect_streaming(wait_for_sync=False))
+                logger.info("Checked MetaAPI streaming connection")
+            except Exception as e:
+                logger.error(f"Error checking MetaAPI streaming connection: {e}")
         
         # Sleep for BTC update interval
         time.sleep(BTC_UPDATE_INTERVAL)
@@ -912,4 +884,36 @@ if __name__ == '__main__':
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     
-    app.run(debug=True, threaded=True, host='127.0.0.1', port=5000)
+    # Add shutdown cleanup for the MetaAPI connection
+    import atexit
+    
+    def cleanup():
+        logger.info("Cleaning up MetaAPI connections...")
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Close both MetaAPI connections
+            loop.run_until_complete(meta_api_streaming.close_connection())
+            loop.run_until_complete(position_tracker.close_connection())
+            
+            logger.info("All MetaAPI connections closed")
+        except Exception as e:
+            logger.error(f"Error closing MetaAPI connections: {e}")
+    
+    atexit.register(cleanup)
+    
+    # Initialize position tracker on startup
+    try:
+        logger.info("Initializing position tracker on startup...")
+        init_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(init_loop)
+        init_loop.run_until_complete(position_tracker.initialize())
+        init_loop.close()
+        logger.info("Position tracker initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize position tracker: {e}")
+    
+    # Get port from environment variable for Heroku compatibility
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=False, threaded=True, host='0.0.0.0', port=port)

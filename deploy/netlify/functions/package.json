@@ -1,0 +1,9 @@
+{
+  "name": "bitcoin-dashboard-functions",
+  "version": "1.0.0",
+  "description": "Netlify serverless functions for Bitcoin Trading Dashboard",
+  "main": "account-data.js",
+  "dependencies": {
+    "metaapi.cloud-sdk": "^5.17.1"
+  }
+}

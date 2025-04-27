@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: btc-dashboard
+    env: python
+    runtime: python
+    plan: free
+    pythonVersion: 3.9.0
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn dashboard:app --timeout 120
+    healthCheckPath: /
+    envVars:
+      - key: META_ACCOUNT_ID
+        value: 6e26b1d7-0c75-4a5d-ae1f-4059fb8e82f1
+      - key: META_API_KEY
+        sync: false
+      - key: META_API_DOMAIN
+        value: mt-client-api-v1.london.agiliumtrade.ai
+      - key: BINANCE_API_URL
+        value: https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT
+      - key: DB_PATH
+        value: crypto_dashboard.db
+      - key: BTC_UPDATE_INTERVAL
+        value: "1"
+      - key: MT5_UPDATE_INTERVAL
+        value: "2.5"
+      - key: MAX_DATA_POINTS
+        value: "120"

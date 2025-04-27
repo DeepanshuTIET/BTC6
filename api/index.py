@@ -2,11 +2,6 @@ import os
 import sys
 import json
 import requests
-import math
-import random
-import plotly
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from flask import Flask, render_template, jsonify, request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -14,7 +9,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Get correct absolute paths for Vercel deployment
+# Get correct absolute paths for Netlify deployment
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 template_path = os.path.join(root_dir, 'templates')
 static_path = os.path.join(root_dir, 'static')
@@ -83,12 +78,11 @@ def get_mt5_equity():
         except Exception as e:
             print(f"Error fetching MT5 equity via API: {e}")
     
-    # Simulation mode - generate semi-realistic equity value
+    # Simulation mode - generate simple equity value
     btc_price = fetch_btc_price()
     base_equity = 10000
-    time_component = math.cos(datetime.now().timestamp() / 3600) * 0.01
-    price_factor = ((btc_price / 65000) - 1) * 0.03  # Correlate with BTC price changes
-    equity = base_equity * (1 + price_factor + time_component)
+    # Simplified calculation without math module
+    equity = base_equity * (1 + (btc_price / 65000 - 1) * 0.05)
     simulated_equity = round(equity, 2)
     print(f"Using simulated equity: {simulated_equity}")
     return simulated_equity
@@ -133,20 +127,19 @@ def get_btc_position():
         except Exception as e:
             print(f"Error fetching BTC position via API: {e}")
     
-    # Simulation mode - generate semi-random position with some persistence
+    # Simulation mode - use time-based position with persistence
     current_hour = datetime.now().hour
     current_minute = datetime.now().minute
     
     # Change position roughly every 5 minutes based on time
-    position_seed = (current_hour * 60 + current_minute) // 5
-    random.seed(position_seed)
-    position_rand = random.random()
+    position_value = (current_hour * 60 + current_minute) % 10
     
-    if position_rand < 0.4:  # 40% chance of Buy
+    # Simple deterministic logic based on time
+    if position_value < 4:  # 40% chance
         simulated_position = "Buy"
-    elif position_rand < 0.7:  # 30% chance of Sell
+    elif position_value < 7:  # 30% chance
         simulated_position = "Sell"
-    else:  # 30% chance of No Position
+    else:  # 30% chance
         simulated_position = "No Position"
     
     if simulated_position != last_position:
