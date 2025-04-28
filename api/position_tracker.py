@@ -62,7 +62,8 @@ class PositionTracker:
             if self.connection and self.connection.terminal_state:
                 # Get positions from terminal state (more accurate than API call)
                 positions = self.connection.terminal_state.positions
-                btc_positions = [pos for pos in positions if pos['symbol'].startswith('BTC')]
+                btc_keywords = ['BTC', 'BITCOIN', 'XBT', 'BTCUSD', 'XBTUSD']
+                btc_positions = [p for p in positions if any(keyword in p['symbol'].upper() for keyword in btc_keywords)]
                 return btc_positions
             else:
                 logger.warning("Connection or terminal state not available")
@@ -93,7 +94,11 @@ class PositionTracker:
                     'volume': position.get('volume', 0),
                     'profit': position.get('profit', 0),
                     'open_price': position.get('openPrice', 0),
-                    'symbol': position.get('symbol', '')
+                    'symbol': position.get('symbol', ''),
+                    'time': position.get('time', 0),
+                    'comment': position.get('comment', ''),
+                    'swap': position.get('swap', 0),
+                    'margin_rate': position.get('marginRate', 0)
                 }
             }
         else:
@@ -104,7 +109,11 @@ class PositionTracker:
                     'volume': position.get('volume', 0),
                     'profit': position.get('profit', 0),
                     'open_price': position.get('openPrice', 0),
-                    'symbol': position.get('symbol', '')
+                    'symbol': position.get('symbol', ''),
+                    'time': position.get('time', 0),
+                    'comment': position.get('comment', ''),
+                    'swap': position.get('swap', 0),
+                    'margin_rate': position.get('marginRate', 0)
                 }
             }
     

@@ -105,8 +105,9 @@ def get_btc_position():
             if response.status_code == 200:
                 positions = response.json()
                 
-                # Look for BTC positions
-                btc_positions = [p for p in positions if 'BTC' in p.get('symbol', '')]
+                # Look for BTC positions - improved search to handle various BTC symbol formats
+                btc_keywords = ['BTC', 'BITCOIN', 'XBT']
+                btc_positions = [p for p in positions if any(keyword in p.get('symbol', '').upper() for keyword in btc_keywords)]
                 
                 if btc_positions:
                     # Determine position type

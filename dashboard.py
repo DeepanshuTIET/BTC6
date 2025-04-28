@@ -26,7 +26,7 @@ BINANCE_API_URL = os.getenv('BINANCE_API_URL', 'https://api.binance.com/api/v3/t
 # MetaAPI credentials from environment variables
 META_ACCOUNT_ID = os.getenv('META_ACCOUNT_ID')
 META_API_KEY = os.getenv('META_API_KEY')
-META_API_DOMAIN = os.getenv('META_API_DOMAIN', 'mt-client-api-v1.london.agiliumtrade.ai')
+META_API_DOMAIN = os.getenv('META_API_DOMAIN', 'mt-api.cloud.agiliumtrade.ai')
 
 # Create a connection pool to reuse connections instead of creating new ones
 connection_pool = {}
