@@ -77,7 +77,7 @@ MAX_DATA_POINTS=120
 After setting up your environment variables, run the dashboard with:
 
 ```bash
-python dashboard.py
+python app.py
 ```
 
 The dashboard will be accessible at http://127.0.0.1:5000/ in your web browser.
